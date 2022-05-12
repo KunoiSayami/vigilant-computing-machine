@@ -402,6 +402,12 @@ mod status_result {
                 message: "Channel not found".to_string(),
             }
         }
+        pub fn database_id_error() -> Self {
+            Self {
+                code: -3,
+                message: "Can't get self database_id".to_string(),
+            }
+        }
         pub fn code(&self) -> i32 {
             self.code
         }

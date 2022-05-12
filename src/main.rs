@@ -20,6 +20,10 @@ async fn real_staff(
     monitor: Vec<i64>,
     need_exit: bool,
 ) -> anyhow::Result<()> {
+    let database_id = conn
+        .query_database_id()
+        .await
+        .map_err(|e| anyhow!("Got query database id error: {:?}", e))?;
     loop {
         if recv.try_recv().is_ok() {
             info!("Exit!");
@@ -32,7 +36,7 @@ async fn real_staff(
             .map_err(|e| anyhow!("Got error while query clients: {:?}", e))?;
 
         let cared_user = clients
-            .into_iter()
+            .iter()
             .any(|client| monitor.contains(&client.client_database_id()));
 
         let status = vlc_con
@@ -44,6 +48,18 @@ async fn real_staff(
             info!("Need exit set to true, exit client.");
             conn.disconnect().await?;
             break;
+        }
+
+        if clients
+            .iter()
+            .filter(|&n| n.client_database_id() == database_id)
+            .count()
+            > 1
+        {
+            info!("Find duplicate session in server, disconnect.");
+            conn.disconnect()
+                .await
+                .map_err(|e| anyhow!("Got error while disconnect from server: {:?}", e))?;
         }
 
         if status == cared_user {
@@ -105,10 +121,8 @@ async fn check_online_in_offline(
             })
             .ok_or_else(|| anyhow!("Can't found any table."))?
             .ok_or_else(|| anyhow!("Can't found any result."))?;
-        if tds.len() > 2 {
-            if tds[1].text().eq("OK") {
-                return Ok(RequestStatus::Online);
-            }
+        if tds.len() > 2 && tds[1].text().eq("OK") {
+            return Ok(RequestStatus::Online);
         }
         conn.connect_server(config.server().address(), config.monitor().username())
             .await
@@ -145,11 +159,10 @@ async fn check_online_in_offline(
             return Err(anyhow!("Can't get self database_id"));
         }
 
-        if clients
-            .iter()
-            .filter(|&n| n.client_database_id() == database_id)
-            .count()
-            > 1
+        if conn
+            .check_self_duplicate()
+            .await
+            .map_err(|e| anyhow!("Got error while check self duplicate: {:?}", e))?
         {
             conn.disconnect()
                 .await
@@ -173,7 +186,7 @@ async fn check_online_in_offline(
     conn.switch_channel_by_name(config.server().channel())
         .await
         .map_err(|e| anyhow!("Switch channel error: {:?}", e))?;
-    return Ok(RequestStatus::NotOnline);
+    Ok(RequestStatus::NotOnline)
 }
 
 fn get_duration(config: &Config, times: u64, ret: RequestStatus) -> Duration {
@@ -215,26 +228,22 @@ async fn running_loop(
     info!("Connected.");
 
     let mut times = 0;
-    loop {
-        if let Err(e) = conn.who_am_i().await {
-            if e.code() == 1794 {
-                let ret = check_online_in_offline(&configure, &mut conn).await?;
-                if ret == RequestStatus::NotOnline {
-                    break;
-                }
-                info!("Client duplicate or target confirm, wait more time to reconnect.");
-                times += 1;
-                if tokio::time::timeout(dbg!(get_duration(&configure, times, ret)), &mut receiver)
-                    .await
-                    .is_ok()
-                {
-                    return Ok(());
-                }
-            } else {
-                return Err(anyhow::Error::from(e));
+    while let Err(e) = conn.who_am_i().await {
+        if e.code() == 1794 {
+            let ret = check_online_in_offline(&configure, &mut conn).await?;
+            if ret == RequestStatus::NotOnline {
+                break;
+            }
+            info!("Client duplicate or target confirm, wait more time to reconnect.");
+            times += 1;
+            if tokio::time::timeout(get_duration(&configure, times, ret), &mut receiver)
+                .await
+                .is_ok()
+            {
+                return Ok(());
             }
         } else {
-            break;
+            return Err(anyhow::Error::from(e));
         }
     }
     real_staff(

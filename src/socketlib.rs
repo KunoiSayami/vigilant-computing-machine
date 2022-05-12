@@ -276,6 +276,55 @@ impl SocketConn {
         }
         Err(QueryError::channel_not_found())
     }
+
+    pub async fn check_self_duplicate(&mut self) -> QueryResult<bool> {
+        let my = self.who_am_i().await?;
+        let clients = self.query_clients().await?;
+        let mut database_id = 0;
+        for client in &clients {
+            if client.client_id() == my.client_id() {
+                database_id = client.client_database_id();
+            }
+        }
+        if database_id == 0 {
+            return Err(QueryError::database_id_error());
+        }
+
+        Ok(clients
+            .iter()
+            .filter(|&n| n.client_database_id() == database_id)
+            .count()
+            > 1)
+    }
+
+    #[allow(dead_code)]
+    pub async fn check_self_duplicate_with_id(&mut self, database_id: i64) -> QueryResult<bool> {
+        Ok(self
+            .query_clients()
+            .await?
+            .iter()
+            .filter(|&n| n.client_database_id() == database_id)
+            .count()
+            > 1)
+    }
+
+    pub async fn query_database_id(&mut self) -> QueryResult<i64> {
+        let my = self.who_am_i().await?;
+        let mut database_id = 0;
+        for client in self
+            .query_clients()
+            .await
+            .map_err(|e| anyhow!("Got error while query clients: {:?}", e))?
+        {
+            if client.client_id() == my.client_id() {
+                database_id = client.client_database_id();
+            }
+        }
+        if database_id == 0 {
+            return Err(QueryError::database_id_error());
+        }
+        Ok(database_id)
+    }
 }
 
 pub struct VLCConn {
