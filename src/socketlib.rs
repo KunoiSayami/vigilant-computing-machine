@@ -213,7 +213,11 @@ impl SocketConn {
         .await
     }
 
-    #[allow(dead_code)]
+    pub async fn set_current_channel_password(&mut self, password: &str) -> QueryResult<()> {
+        let me = self.who_am_i().await?;
+        self.set_channel_password(me.channel_id(), password).await
+    }
+
     pub async fn set_channel_password(&mut self, cid: i64, password: &str) -> QueryResult<()> {
         self.basic_operation(&format!(
             "clientedit cid={} client_password={}\n\r",

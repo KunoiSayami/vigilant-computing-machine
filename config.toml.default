@@ -11,5 +11,7 @@ interval = 1
 
 [server]
 address = ""
-port = ""
+#port = 1145
 channel = ""
+timeout = 5
+password = ""

@@ -292,6 +292,7 @@ pub mod config {
         //port: u16,
         channel: String,
         timeout: Option<u64>,
+        password: Option<String>,
     }
 
     impl Server {
@@ -307,6 +308,9 @@ pub mod config {
 
         pub fn timeout(&self) -> u64 {
             self.timeout.map(|x| if x < 3 { 3 } else { x }).unwrap_or(3)
+        }
+        pub fn password(&self) -> &Option<String> {
+            &self.password
         }
     }
 

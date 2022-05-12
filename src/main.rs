@@ -4,7 +4,7 @@ use crate::datastructures::Config;
 use crate::socketlib::{SocketConn, VLCConn};
 use anyhow::anyhow;
 use clap::{arg, Command};
-use log::{debug, info};
+use log::{debug, error, info};
 use soup::prelude::*;
 use std::time::Duration;
 use tokio::sync::oneshot::Receiver;
@@ -121,7 +121,7 @@ async fn check_online_in_offline(
             })
             .ok_or_else(|| anyhow!("Can't found any table."))?
             .ok_or_else(|| anyhow!("Can't found any result."))?;
-        if tds.len() > 2 && tds[1].text().eq("OK") {
+        if tds.len() > 2 && tds[1].text().to_lowercase().eq("online") {
             return Ok(RequestStatus::Online);
         }
         conn.connect_server(config.server().address(), config.monitor().username())
@@ -186,6 +186,13 @@ async fn check_online_in_offline(
     conn.switch_channel_by_name(config.server().channel())
         .await
         .map_err(|e| anyhow!("Switch channel error: {:?}", e))?;
+    tokio::time::sleep(Duration::from_micros(500)).await;
+    if let Some(password) = config.server().password() {
+        conn.set_current_channel_password(password)
+            .await
+            .map_err(|e| error!("Set password error, ignored: {:?}", e))
+            .ok();
+    }
     Ok(RequestStatus::NotOnline)
 }
 
