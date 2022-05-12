@@ -113,7 +113,7 @@ async fn check_online_in_offline(
         conn.connect_server(config.server().address(), config.monitor().username())
             .await
             .map_err(|e| anyhow!("Connect to server failure: {:?}", e))?;
-        conn.wait_timeout(Duration::from_secs(3))
+        conn.wait_timeout(Duration::from_secs(config.server().timeout()))
             .await
             .map_err(|_| anyhow!("Wait connect timeout"))??;
     } else {
@@ -122,7 +122,7 @@ async fn check_online_in_offline(
             .map_err(|e| anyhow!("Unable to connect server: {:?}", e))?;
         info!("Login to server (check)");
 
-        conn.wait_timeout(Duration::from_secs(3))
+        conn.wait_timeout(Duration::from_secs(config.server().timeout()))
             .await
             .map_err(|_| anyhow!("Wait connect timeout"))??;
         debug!("Connected to server!");
