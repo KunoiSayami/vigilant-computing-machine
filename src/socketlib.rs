@@ -139,7 +139,6 @@ impl SocketConn {
         //let status = status.ok_or_else(|| anyhow!("Can't find status line."))?;
     }
 
-    #[allow(dead_code)]
     fn escape(s: &str) -> String {
         s.replace('\\', "\\\\")
             .replace(' ', "\\s")
@@ -220,7 +219,7 @@ impl SocketConn {
 
     pub async fn set_channel_password(&mut self, cid: i64, password: &str) -> QueryResult<()> {
         self.basic_operation(&format!(
-            "clientedit cid={} client_password={}\n\r",
+            "channeledit cid={} channel_password={}\n\r",
             cid,
             Self::escape(password)
         ))
