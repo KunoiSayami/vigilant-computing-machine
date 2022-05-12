@@ -1,2 +1,15 @@
 api_key = ""
 monitor_id = 0
+need_disconnect = false
+
+[monitor]
+web = true
+username = ""
+backend = ""
+# minute
+interval = 1
+
+[server]
+address = ""
+port = ""
+channel = ""

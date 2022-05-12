@@ -1,11 +1,11 @@
-use crate::datastructures::{Client, ConnnectInfo, QueryResult, WhoAmI};
+use crate::datastructures::{Channel, Client, ConnnectInfo, QueryError, QueryResult, WhoAmI};
 use crate::datastructures::{FromQueryString, QueryStatus};
 use anyhow::anyhow;
 use log::{error, info, warn};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-
+use tokio::time::error::Elapsed;
 const BUFFER_SIZE: usize = 512;
 
 pub struct SocketConn {
@@ -184,6 +184,10 @@ impl SocketConn {
         self.query_operation_non_error("clientlist\n\r").await
     }
 
+    pub async fn query_channels(&mut self) -> QueryResult<Vec<Channel>> {
+        self.query_operation_non_error("channellist\n\r").await
+    }
+
     #[allow(dead_code)]
     pub async fn logout(&mut self) -> QueryResult<()> {
         self.basic_operation("quit\n\r").await
@@ -198,14 +202,13 @@ impl SocketConn {
     pub async fn connect_server(
         &mut self,
         address: &str,
-        connect_to: &str,
+        //connect_to: &str,
         nick_name: &str,
     ) -> QueryResult<()> {
         self.basic_operation(&format!(
-            "connect address={} nickname={} channel={}\n\r",
+            "connect address={} nickname={}\n\r",
             address,
             Self::escape(nick_name),
-            Self::escape(connect_to)
         ))
         .await
     }
@@ -225,6 +228,53 @@ impl SocketConn {
         self.query_operation_non_error("serverconnectinfo\n\r")
             .await
             .map(|mut v| v.remove(0))
+    }
+
+    #[allow(dead_code)]
+    pub async fn switch_channel(&mut self, channel_id: i64) -> QueryResult<()> {
+        let me = self.who_am_i().await?;
+        self.basic_operation(&format!(
+            "clientmove cid={} clid={}\n\r",
+            channel_id,
+            me.client_id(),
+        ))
+        .await
+    }
+
+    pub async fn wait_until_connect(&mut self) -> QueryResult<()> {
+        while let Err(e) = self.who_am_i().await {
+            if e.code() == 1794 {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                continue;
+            } else {
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn wait_timeout(&mut self, duration: Duration) -> Result<QueryResult<()>, Elapsed> {
+        tokio::time::timeout(duration, self.wait_until_connect()).await
+    }
+
+    pub async fn switch_channel_by_name(&mut self, channel_name: &str) -> QueryResult<()> {
+        let me = self.who_am_i().await?;
+        for channel in self
+            .query_channels()
+            .await
+            .map_err(|e| anyhow!("Can't fetch channels: {:?}", e))?
+        {
+            if channel.channel_name().eq(channel_name) {
+                return self
+                    .basic_operation(&format!(
+                        "clientmove cid={} clid={}\n\r",
+                        channel.cid(),
+                        me.client_id(),
+                    ))
+                    .await;
+            }
+        }
+        Err(QueryError::channel_not_found())
     }
 }
 

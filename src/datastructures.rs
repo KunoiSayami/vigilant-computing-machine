@@ -24,18 +24,18 @@ pub mod whoami {
 
     #[derive(Clone, Debug, Default, Deserialize)]
     pub struct WhoAmI {
-        #[serde(deserialize_with = "from_str")]
+        #[serde(deserialize_with = "from_str", rename = "clid")]
         client_id: i64,
-        #[serde(deserialize_with = "from_str")]
-        client_database_id: i64,
+        #[serde(deserialize_with = "from_str", rename = "cid")]
+        channel_id: i64,
     }
 
     impl WhoAmI {
-        pub fn cldbid(&self) -> i64 {
-            self.client_database_id
-        }
-        pub fn clid(&self) -> i64 {
+        pub fn client_id(&self) -> i64 {
             self.client_id
+        }
+        pub fn channel_id(&self) -> i64 {
+            self.channel_id
         }
     }
 
@@ -77,8 +77,6 @@ pub mod channel {
         channel_name: String,
         #[serde(deserialize_with = "from_str")]
         total_clients: i64,
-        #[serde(deserialize_with = "from_str")]
-        channel_needed_subscribe_power: i64,
     }
 
     #[allow(dead_code)]
@@ -97,9 +95,6 @@ pub mod channel {
         }
         pub fn total_clients(&self) -> i64 {
             self.total_clients
-        }
-        pub fn channel_needed_subscribe_power(&self) -> i64 {
-            self.channel_needed_subscribe_power
         }
     }
 
@@ -274,36 +269,92 @@ pub mod config {
     use std::path::Path;
 
     #[derive(Clone, Debug, Deserialize)]
+    #[serde(untagged)]
+    pub enum Integer {
+        Single(i64),
+        Multiple(Vec<i64>),
+    }
+
+    impl Integer {
+        fn to_vec(&self) -> Vec<i64> {
+            match self {
+                Integer::Single(id) => {
+                    vec![*id]
+                }
+                Integer::Multiple(ids) => ids.clone(),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, Deserialize)]
     pub struct Server {
-        server: String,
-        port: u16,
+        address: String,
+        //port: u16,
         channel: String,
     }
 
     impl Server {
-        pub fn server(&self) -> &str {
-            &self.server
+        pub fn address(&self) -> &str {
+            &self.address
         }
-        pub fn port(&self) -> u16 {
+        /*pub fn port(&self) -> u16 {
             self.port
-        }
+        }*/
         pub fn channel(&self) -> &str {
             &self.channel
         }
     }
 
     #[derive(Clone, Debug, Deserialize)]
+    pub struct Monitor {
+        #[serde(rename = "web")]
+        web_enabled: bool,
+        username: String,
+        backend: String,
+        interval: Option<u64>,
+    }
+
+    impl Monitor {
+        pub fn web_enabled(&self) -> bool {
+            self.web_enabled
+        }
+        pub fn username(&self) -> &str {
+            &self.username
+        }
+        pub fn backend(&self) -> &str {
+            &self.backend
+        }
+        pub fn interval(&self) -> u64 {
+            self.interval
+                .map(|x| if x == 0 { 1 } else { x })
+                .unwrap_or(1)
+        }
+    }
+
+    #[derive(Clone, Debug, Deserialize)]
     pub struct Config {
         api_key: String,
-        monitor_id: i64,
+        monitor_id: Integer,
+        need_disconnect: Option<bool>,
+        monitor: Monitor,
+        server: Server,
     }
 
     impl Config {
         pub fn api_key(&self) -> &str {
             &self.api_key
         }
-        pub fn monitor_id(&self) -> i64 {
-            self.monitor_id
+        pub fn need_disconnect(&self) -> bool {
+            self.need_disconnect.unwrap_or_default()
+        }
+        pub fn monitor_id(&self) -> Vec<i64> {
+            self.monitor_id.to_vec()
+        }
+        pub fn monitor(&self) -> &Monitor {
+            &self.monitor
+        }
+        pub fn server(&self) -> &Server {
+            &self.server
         }
     }
 
@@ -338,6 +389,12 @@ mod status_result {
             Self {
                 code: -1,
                 message: "Expect result but none found.".to_string(),
+            }
+        }
+        pub fn channel_not_found() -> Self {
+            Self {
+                code: -2,
+                message: "Channel not found".to_string(),
             }
         }
         pub fn code(&self) -> i32 {
