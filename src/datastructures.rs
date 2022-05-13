@@ -293,6 +293,7 @@ pub mod config {
         channel: String,
         timeout: Option<u64>,
         password: Option<String>,
+        switch_wait: Option<u64>,
     }
 
     impl Server {
@@ -311,6 +312,11 @@ pub mod config {
         }
         pub fn password(&self) -> &Option<String> {
             &self.password
+        }
+        pub fn switch_wait(&self) -> u64 {
+            self.switch_wait
+                .map(|x| if x <= 500 { 500 } else { x })
+                .unwrap_or(500)
         }
     }
 

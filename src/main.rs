@@ -186,7 +186,7 @@ async fn check_online_in_offline(
     conn.switch_channel_by_name(config.server().channel())
         .await
         .map_err(|e| anyhow!("Switch channel error: {:?}", e))?;
-    tokio::time::sleep(Duration::from_micros(500)).await;
+    tokio::time::sleep(Duration::from_micros(config.server().switch_wait())).await;
     if let Some(password) = config.server().password() {
         conn.set_current_channel_password(password)
             .await
@@ -275,7 +275,7 @@ async fn staff(path: &str, server: &str, port: u16) -> anyhow::Result<()> {
             info!("Recv SIGINT again, force exit.");
             std::process::exit(137);
         } => {}
-        ret = running_loop(path, server ,port, receiver) =>  {
+        ret = running_loop(path, server, port, receiver) =>  {
            ret?
         }
     }
@@ -295,6 +295,7 @@ fn main() -> anyhow::Result<()> {
 
     env_logger::Builder::from_default_env()
         .filter_module("html5ever", log::LevelFilter::Warn)
+        .filter_module("reqwest", log::LevelFilter::Warn)
         .init();
 
     tokio::runtime::Builder::new_current_thread()
