@@ -192,12 +192,10 @@ impl SocketConn {
         self.basic_operation("quit\n\r").await
     }
 
-    #[allow(dead_code)]
     pub async fn disconnect(&mut self) -> QueryResult<()> {
         self.basic_operation("disconnect\n\r").await
     }
 
-    #[allow(dead_code)]
     pub async fn connect_server(
         &mut self,
         address: &str,
@@ -212,9 +210,34 @@ impl SocketConn {
         .await
     }
 
+    #[allow(dead_code)]
     pub async fn set_current_channel_password(&mut self, password: &str) -> QueryResult<()> {
         let me = self.who_am_i().await?;
         self.set_channel_password(me.channel_id(), password).await
+    }
+
+    pub async fn set_channel_password_if_switched(
+        &mut self,
+        password: &str,
+        current_channel_id: i64,
+        timeout: u64,
+    ) -> QueryResult<bool> {
+        if tokio::time::timeout(Duration::from_micros(timeout), async {
+            while let Ok(me) = self.who_am_i().await {
+                if me.channel_id() != current_channel_id {
+                    break;
+                }
+            }
+        })
+        .await
+        .is_ok()
+        {
+            let me = self.who_am_i().await?;
+            self.set_channel_password(me.channel_id(), password).await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     pub async fn set_channel_password(&mut self, cid: i64, password: &str) -> QueryResult<()> {
@@ -260,7 +283,7 @@ impl SocketConn {
         tokio::time::timeout(duration, self.wait_until_connect()).await
     }
 
-    pub async fn switch_channel_by_name(&mut self, channel_name: &str) -> QueryResult<()> {
+    pub async fn switch_channel_by_name(&mut self, channel_name: &str) -> QueryResult<i64> {
         let me = self.who_am_i().await?;
         for channel in self
             .query_channels()
@@ -268,13 +291,13 @@ impl SocketConn {
             .map_err(|e| anyhow!("Can't fetch channels: {:?}", e))?
         {
             if channel.channel_name().eq(channel_name) {
-                return self
-                    .basic_operation(&format!(
-                        "clientmove cid={} clid={}\n\r",
-                        channel.cid(),
-                        me.client_id(),
-                    ))
-                    .await;
+                self.basic_operation(&format!(
+                    "clientmove cid={} clid={}\n\r",
+                    channel.cid(),
+                    me.client_id(),
+                ))
+                .await?;
+                return Ok(channel.cid());
             }
         }
         Err(QueryError::channel_not_found())

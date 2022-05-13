@@ -1,5 +1,3 @@
-extern crate core;
-
 use crate::datastructures::Config;
 use crate::socketlib::{SocketConn, VLCConn};
 use anyhow::anyhow;
@@ -134,12 +132,11 @@ async fn check_online_in_offline(
         conn.connect_server(config.server().address(), config.monitor().username())
             .await
             .map_err(|e| anyhow!("Unable to connect server: {:?}", e))?;
-        info!("Login to server (check)");
+        debug!("Login to server (check)");
 
         conn.wait_timeout(Duration::from_secs(config.server().timeout()))
             .await
             .map_err(|_| anyhow!("Wait connect timeout"))??;
-        debug!("Connected to server!");
 
         let my = conn
             .who_am_i()
@@ -182,16 +179,26 @@ async fn check_online_in_offline(
         conn.disconnect().await?;
         return Ok(RequestStatus::TargetDetected);
     }
+    info!("Connected to server.");
 
-    conn.switch_channel_by_name(config.server().channel())
+    let current_channel_id = conn
+        .switch_channel_by_name(config.server().channel())
         .await
         .map_err(|e| anyhow!("Switch channel error: {:?}", e))?;
-    tokio::time::sleep(Duration::from_micros(config.server().switch_wait())).await;
     if let Some(password) = config.server().password() {
-        conn.set_current_channel_password(password)
-            .await
-            .map_err(|e| error!("Set password error, ignored: {:?}", e))
-            .ok();
+        conn.set_channel_password_if_switched(
+            password,
+            current_channel_id,
+            config.server().switch_wait(),
+        )
+        .await
+        .map_err(|e| error!("Set password error, ignored: {:?}", e))
+        .map(|result| {
+            if !result {
+                error!("Channel not switch, skipped.");
+            }
+        })
+        .ok();
     }
     Ok(RequestStatus::NotOnline)
 }
@@ -204,9 +211,7 @@ fn get_duration(config: &Config, times: u64, ret: RequestStatus) -> Duration {
                 1 => 5,
                 2 => 30,
                 3..=u64::MAX => 60,
-                _ => {
-                    unreachable!()
-                }
+                _ => unreachable!(),
             } * 60,
         ),
         RequestStatus::NotOnline => unreachable!(),
@@ -241,7 +246,9 @@ async fn running_loop(
             if ret == RequestStatus::NotOnline {
                 break;
             }
-            info!("Client duplicate or target confirm, wait more time to reconnect.");
+            if ret != RequestStatus::Online {
+                info!("Client duplicate or target confirm, wait more time to reconnect.");
+            }
             times += 1;
             if tokio::time::timeout(get_duration(&configure, times, ret), &mut receiver)
                 .await
