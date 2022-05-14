@@ -203,17 +203,17 @@ async fn check_online_in_offline(
     Ok(RequestStatus::NotOnline)
 }
 
-fn get_duration(config: &Config, times: u64, ret: RequestStatus) -> Duration {
+fn get_duration(config: &Config, times: u64, ret: RequestStatus) -> u64 {
     match ret {
-        RequestStatus::Online => Duration::from_secs(config.monitor().interval() * 60),
-        RequestStatus::TargetDetected | RequestStatus::DuplicateClient => Duration::from_secs(
-            match times {
+        RequestStatus::Online => config.monitor().interval() * 60,
+        RequestStatus::TargetDetected | RequestStatus::DuplicateClient => {
+            (match times {
                 1 => 5,
                 2 => 30,
                 3..=u64::MAX => 60,
                 _ => unreachable!(),
-            } * 60,
-        ),
+            }) * 60
+        }
         RequestStatus::NotOnline => unreachable!(),
     }
 }
@@ -237,7 +237,7 @@ async fn running_loop(
         .await
         .map_err(|e| anyhow!("Connect to VLC console error: {:?}", e))?;
 
-    info!("Connected.");
+    info!("Working.");
 
     let mut times = 0;
     while let Err(e) = conn.who_am_i().await {
@@ -250,11 +250,15 @@ async fn running_loop(
                 info!("Client duplicate or target confirm, wait more time to reconnect.");
             }
             times += 1;
-            if tokio::time::timeout(get_duration(&configure, times, ret), &mut receiver)
-                .await
-                .is_ok()
-            {
-                return Ok(());
+            let duration = get_duration(&configure, times, ret);
+            for _ in 0..duration / 30 {
+                conn.who_am_i().await.ok();
+                if tokio::time::timeout(Duration::from_secs(30), &mut receiver)
+                    .await
+                    .is_ok()
+                {
+                    return Ok(());
+                }
             }
         } else {
             return Err(anyhow::Error::from(e));
