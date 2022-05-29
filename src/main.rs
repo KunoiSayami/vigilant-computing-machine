@@ -91,6 +91,7 @@ enum RequestStatus {
 async fn check_online_in_offline(
     config: &Config,
     conn: &mut SocketConn,
+    nickname: &str,
 ) -> anyhow::Result<RequestStatus> {
     if config.monitor().web_enabled() {
         let client = reqwest::Client::builder()
@@ -122,14 +123,14 @@ async fn check_online_in_offline(
         if tds.len() > 2 && tds[1].text().to_lowercase().eq("online") {
             return Ok(RequestStatus::Online);
         }
-        conn.connect_server(config.server().address(), config.monitor().username())
+        conn.connect_server(config.server().address(), nickname)
             .await
             .map_err(|e| anyhow!("Connect to server failure: {:?}", e))?;
         conn.wait_timeout(Duration::from_secs(config.server().timeout()))
             .await
             .map_err(|_| anyhow!("Wait connect timeout"))??;
     } else {
-        conn.connect_server(config.server().address(), config.monitor().username())
+        conn.connect_server(config.server().address(), nickname)
             .await
             .map_err(|e| anyhow!("Unable to connect server: {:?}", e))?;
         debug!("Login to server (check)");
@@ -239,10 +240,22 @@ async fn running_loop(
 
     info!("Working.");
 
+    let nickname = {
+        let default = configure
+            .server()
+            .username()
+            .clone()
+            .unwrap_or_else(|| configure.monitor().username().to_string());
+        if configure.show_bot_tag() {
+            format!("{}(bot)", default)
+        } else {
+            default
+        }
+    };
     let mut times = 0;
     while let Err(e) = conn.who_am_i().await {
         if e.code() == 1794 {
-            let ret = check_online_in_offline(&configure, &mut conn).await?;
+            let ret = check_online_in_offline(&configure, &mut conn, &nickname).await?;
             if ret == RequestStatus::NotOnline {
                 break;
             }

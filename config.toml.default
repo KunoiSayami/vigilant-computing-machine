@@ -1,6 +1,7 @@
 api_key = ""
 monitor_id = 0
 need_disconnect = false
+show_bot_tag = false
 
 [monitor]
 web = true
@@ -16,3 +17,4 @@ channel = ""
 timeout = 5
 password = ""
 switch_wait = 1000
+username = ""

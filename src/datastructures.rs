@@ -267,7 +267,27 @@ pub mod config {
     use serde_derive::Deserialize;
     use std::fs::read_to_string;
     use std::path::Path;
+    /*use toml::value::Time;
 
+        #[derive(Clone, Debug, Deserialize)]
+        pub struct TimeOption {
+            enabled: bool,
+            start: Option<Time>,
+            end: Option<Time>,
+        }
+
+        impl TimeOption {
+            pub fn enabled(&self) -> bool {
+                self.enabled
+            }
+            pub fn start(&self) -> &Option<Time> {
+                &self.start
+            }
+            pub fn end(&self) -> &Option<Time> {
+                &self.end
+            }
+        }
+    */
     #[derive(Clone, Debug, Deserialize)]
     #[serde(untagged)]
     pub enum Integer {
@@ -294,6 +314,8 @@ pub mod config {
         timeout: Option<u64>,
         password: Option<String>,
         switch_wait: Option<u64>,
+        username: Option<String>,
+        //time: Option<TimeOption>,
     }
 
     impl Server {
@@ -317,6 +339,10 @@ pub mod config {
             self.switch_wait
                 .map(|x| if x <= 500 { 500 } else { x })
                 .unwrap_or(500)
+        }
+
+        pub fn username(&self) -> &Option<String> {
+            &self.username
         }
     }
 
@@ -351,6 +377,7 @@ pub mod config {
         api_key: String,
         monitor_id: Integer,
         need_disconnect: Option<bool>,
+        show_bot_tag: Option<bool>,
         monitor: Monitor,
         server: Server,
     }
@@ -370,6 +397,9 @@ pub mod config {
         }
         pub fn server(&self) -> &Server {
             &self.server
+        }
+        pub fn show_bot_tag(&self) -> bool {
+            self.show_bot_tag.unwrap_or(false)
         }
     }
 

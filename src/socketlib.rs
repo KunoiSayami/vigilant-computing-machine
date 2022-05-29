@@ -304,11 +304,11 @@ impl SocketConn {
     }
 
     pub async fn check_self_duplicate(&mut self) -> QueryResult<bool> {
-        let my = self.who_am_i().await?;
+        let me = self.who_am_i().await?;
         let clients = self.query_clients().await?;
         let mut database_id = 0;
         for client in &clients {
-            if client.client_id() == my.client_id() {
+            if client.client_id() == me.client_id() {
                 database_id = client.client_database_id();
             }
         }
