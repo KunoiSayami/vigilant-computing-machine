@@ -170,27 +170,6 @@ pub mod query_status {
     use anyhow::anyhow;
     use serde_derive::Deserialize;
 
-    #[derive(Clone, Debug, Deserialize)]
-    pub struct WebQueryStatus {
-        code: i32,
-        message: String,
-    }
-
-    impl WebQueryStatus {
-        pub fn into_status(self) -> QueryStatus {
-            QueryStatus {
-                id: self.code,
-                msg: self.message,
-            }
-        }
-    }
-
-    impl From<WebQueryStatus> for QueryStatus {
-        fn from(status: WebQueryStatus) -> Self {
-            status.into_status()
-        }
-    }
-
     #[allow(dead_code)]
     #[derive(Clone, Debug, Deserialize)]
     pub struct QueryStatus {
@@ -228,14 +207,14 @@ pub mod query_status {
     }
 
     impl TryFrom<&str> for QueryStatus {
-        type Error = anyhow::Error;
+        type Error = QueryError;
 
         fn try_from(value: &str) -> Result<Self, Self::Error> {
             let (_, line) = value
                 .split_once("error ")
                 .ok_or_else(|| anyhow!("Split error: {}", value))?;
             serde_teamspeak_querystring::from_str(line)
-                .map_err(|e| anyhow!("Got error while parse string: {:?} {:?}", line, e))
+                .map_err(|e| QueryError::parse_error(format!("Parse {:?} error: {:?}", line, e)))
         }
     }
 }
@@ -245,12 +224,12 @@ pub mod connect_info {
     use serde_derive::Deserialize;
 
     #[derive(Clone, Debug, Deserialize)]
-    pub struct ConnnectInfo {
+    pub struct ConnectInfo {
         ip: String,
         port: u16,
     }
 
-    impl ConnnectInfo {
+    impl ConnectInfo {
         pub fn ip(&self) -> &str {
             &self.ip
         }
@@ -259,7 +238,7 @@ pub mod connect_info {
         }
     }
 
-    impl FromQueryString for ConnnectInfo {}
+    impl FromQueryString for ConnectInfo {}
 }
 
 pub mod config {
@@ -421,7 +400,7 @@ mod status_result {
     use anyhow::Error;
     use std::fmt::{Display, Formatter};
 
-    pub type QueryResult<T> = std::result::Result<T, QueryError>;
+    pub type QueryResult<T> = Result<T, QueryError>;
 
     #[derive(Clone, Default, Debug)]
     pub struct QueryError {
@@ -448,6 +427,27 @@ mod status_result {
                 message: "Can't get self database_id".to_string(),
             }
         }
+        pub fn status_not_found() -> Self {
+            Self {
+                code: -4,
+                message: "Status line not found".to_string(),
+            }
+        }
+        pub fn split_error(value: &str) -> Self {
+            Self {
+                code: -5,
+                message: format!("Split error {}", value),
+            }
+        }
+        pub fn parse_error(message: String) -> Self {
+            Self { code: -6, message }
+        }
+        pub fn result_not_found(payload: &str) -> Self {
+            Self {
+                code: -7,
+                message: format!("Result not found: {:?}", payload),
+            }
+        }
         pub fn code(&self) -> i32 {
             self.code
         }
@@ -470,10 +470,10 @@ mod status_result {
         }
     }
 
-    impl From<anyhow::Error> for QueryError {
+    impl From<Error> for QueryError {
         fn from(s: Error) -> Self {
             Self {
-                code: -2,
+                code: -114514,
                 message: s.to_string(),
             }
         }
@@ -483,9 +483,9 @@ mod status_result {
 pub use channel::Channel;
 pub use client::Client;
 pub use config::Config;
-pub use connect_info::ConnnectInfo;
+pub use connect_info::ConnectInfo;
 pub use create_channel::CreateChannel;
-pub use query_status::{QueryStatus, WebQueryStatus};
+pub use query_status::QueryStatus;
 use serde::Deserialize;
 pub use status_result::{QueryError, QueryResult};
 pub use whoami::WhoAmI;

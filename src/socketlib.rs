@@ -1,4 +1,4 @@
-use crate::datastructures::{Channel, Client, ConnnectInfo, QueryError, QueryResult, WhoAmI};
+use crate::datastructures::{Channel, Client, ConnectInfo, QueryError, QueryResult, WhoAmI};
 use crate::datastructures::{FromQueryString, QueryStatus};
 use anyhow::anyhow;
 use log::{error, info, warn};
@@ -59,6 +59,7 @@ impl SocketConn {
             .map_err(|e| anyhow!("Got error while send data: {:?}", e))?;
         Ok(())
     }
+
     fn decode_status(content: String) -> QueryResult<String> {
         /*debug_assert!(
             !content.contains("Welcome to the TeamSpeak 3") && content.contains("error id="),
@@ -73,7 +74,8 @@ impl SocketConn {
                 return status.into_result(content);
             }
         }
-        panic!("Should return status in reply => {}", content)
+        error!("Should return status in reply => {}", content);
+        Err(QueryError::status_not_found())
     }
 
     fn decode_status_with_result<T: FromQueryString + Sized>(
@@ -123,10 +125,16 @@ impl SocketConn {
         payload: &str,
     ) -> QueryResult<Vec<T>> {
         let data = self.write_and_read(payload).await?;
-        let ret = Self::decode_status_with_result(data)?;
-        Ok(ret
-            .ok_or_else(|| panic!("Can't find result line, payload => {}", payload))
-            .unwrap())
+        match Self::decode_status_with_result(data) {
+            Ok(ret) => ret,
+            Err(e) => {
+                if e.code() != -6 {
+                    return Err(e);
+                }
+                Self::decode_status_with_result(self.write_and_read(payload).await?)?
+            }
+        }
+        .ok_or_else(|| QueryError::result_not_found(payload))
     }
 
     #[allow(dead_code)]
@@ -250,7 +258,7 @@ impl SocketConn {
     }
 
     #[allow(dead_code)]
-    pub async fn server_connect_info(&mut self) -> QueryResult<ConnnectInfo> {
+    pub async fn server_connect_info(&mut self) -> QueryResult<ConnectInfo> {
         self.query_operation_non_error("serverconnectinfo\n\r")
             .await
             .map(|mut v| v.remove(0))
