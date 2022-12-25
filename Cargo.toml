@@ -1,6 +1,6 @@
 [package]
 name = "project-tesla"
-version = "0.2.8"
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
@@ -18,6 +18,8 @@ soup = { version ="0.5.1", optional = true }
 teloxide = { version = "0.9.0", optional = true }
 tokio = { version = "1.17", features = ["full"] }
 toml = "0.5.9"
+#tsclientlib = { git = "https://github.com/ReSpeak/tsclientlib.git"}
+tsclientlib = "0.2.0"
 
 [features]
 default = ["auto-leave"]

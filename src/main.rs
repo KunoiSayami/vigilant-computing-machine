@@ -4,8 +4,10 @@ use anyhow::anyhow;
 use clap::{arg, Command};
 use log::{debug, error, info};
 use soup::prelude::*;
+use std::future;
 use std::time::Duration;
 use tokio::sync::oneshot::Receiver;
+use tsclientlib::{Connection, Identity};
 
 #[allow(dead_code)]
 mod datastructures;
@@ -93,115 +95,7 @@ async fn check_online_in_offline(
     conn: &mut SocketConn,
     nickname: &str,
 ) -> anyhow::Result<RequestStatus> {
-    if config.monitor().web_enabled() {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(config.monitor().interval() * 60))
-            .build()
-            .unwrap();
-        let ret = client
-            .post(config.monitor().backend())
-            //.headers(header_map)
-            .form(&[("usersuche", config.monitor().username()), ("username", "")])
-            .send()
-            .await
-            .map_err(|e| anyhow!("Got error while send monitor request {:?}", e))?
-            .text()
-            .await
-            .map_err(|e| anyhow!("Got error while get text from request: {:?}", e))?;
-        let soup = Soup::new(&ret);
-        let tds = soup
-            .tag("tbody")
-            .find()
-            .map(|tbody| {
-                tbody
-                    .tag("tr")
-                    .find()
-                    .map(|tr| tr.tag("td").find_all().collect::<Vec<_>>())
-            })
-            .ok_or_else(|| anyhow!("Can't found any table."))?
-            .ok_or_else(|| anyhow!("Can't found any result."))?;
-        if tds.len() > 2 && tds[1].text().to_lowercase().eq("online") {
-            return Ok(RequestStatus::Online);
-        }
-        conn.connect_server(config.server().address(), nickname)
-            .await
-            .map_err(|e| anyhow!("Connect to server failure: {:?}", e))?;
-        conn.wait_timeout(Duration::from_secs(config.server().timeout()))
-            .await
-            .map_err(|_| anyhow!("Wait connect timeout"))??;
-    } else {
-        conn.connect_server(config.server().address(), nickname)
-            .await
-            .map_err(|e| anyhow!("Unable to connect server: {:?}", e))?;
-        debug!("Login to server (check)");
-
-        conn.wait_timeout(Duration::from_secs(config.server().timeout()))
-            .await
-            .map_err(|_| anyhow!("Wait connect timeout"))??;
-
-        let my = conn
-            .who_am_i()
-            .await
-            .map_err(|e| anyhow!("Got error while command whoami: {:?}", e))?;
-        let clients = conn
-            .query_clients()
-            .await
-            .map_err(|e| anyhow!("Got error while query clients: {:?}", e))?;
-        let mut database_id = 0;
-        for client in &clients {
-            if client.client_id() == my.client_id() {
-                database_id = client.client_database_id();
-            }
-        }
-        if database_id == 0 {
-            return Err(anyhow!("Can't get self database_id"));
-        }
-
-        if conn
-            .check_self_duplicate()
-            .await
-            .map_err(|e| anyhow!("Got error while check self duplicate: {:?}", e))?
-        {
-            conn.disconnect()
-                .await
-                .map_err(|e| anyhow!("Got error while disconnect from server: {:?}", e))?;
-            return Ok(RequestStatus::DuplicateClient);
-        }
-    }
-    // Early check
-    let monitor_id = config.monitor_id();
-    if conn
-        .query_clients()
-        .await
-        .map_err(|e| anyhow!("Got error while list clients: {:?}", e))?
-        .into_iter()
-        .any(|client| monitor_id.contains(&client.client_database_id()))
-    {
-        conn.disconnect().await?;
-        return Ok(RequestStatus::TargetDetected);
-    }
-    info!("Connected to server.");
-
-    let current_channel_id = conn
-        .switch_channel_by_name(config.server().channel())
-        .await
-        .map_err(|e| anyhow!("Switch channel error: {:?}", e))?;
-    if let Some(password) = config.server().password() {
-        conn.set_channel_password_if_switched(
-            password,
-            current_channel_id,
-            config.server().switch_wait(),
-        )
-        .await
-        .map_err(|e| error!("Set password error, ignored: {:?}", e))
-        .map(|result| {
-            if !result {
-                error!("Channel not switch, skipped.");
-            }
-        })
-        .ok();
-    }
-    Ok(RequestStatus::NotOnline)
+    todo!()
 }
 
 fn get_duration(config: &Config, times: u64, ret: RequestStatus) -> u64 {
@@ -228,18 +122,6 @@ async fn running_loop(
     let configure = Config::try_from(path.as_ref())
         .map_err(|e| anyhow!("Read configure file error: {:?}", e))?;
 
-    let mut conn = SocketConn::connect(server, port)
-        .await
-        .map_err(|e| anyhow!("Connect teamspeak console error: {:?}", e))?;
-    conn.login(configure.api_key()).await?;
-    //conn.register_events().await??;
-
-    let vlc_conn = VLCConn::connect("localhost", 4212, "1\n\r")
-        .await
-        .map_err(|e| anyhow!("Connect to VLC console error: {:?}", e))?;
-
-    info!("Working.");
-
     let nickname = {
         let default = configure
             .server()
@@ -252,6 +134,22 @@ async fn running_loop(
             default
         }
     };
+    info!("Working.");
+    let mut conn = Connection::build(&configure.server().address())
+        .name(nickname)
+        .version(tsclientlib::Version::Linux_3_5_6)
+        .channel(configure.server().channel())
+        .identity(Identity::new_from_str(configure.identity()).unwrap())
+        .connect()
+        .map_err(|e| anyhow!("Connect failure: {:?}", e))?;
+
+    conn.events()
+        // We are connected when we receive the first BookEvents
+        .try_filter(|e| future::ready(matches!(e, StreamItem::BookEvents(_))))
+        .next()
+        .await
+        .unwrap();
+
     let mut times = 0;
     while let Err(e) = conn.who_am_i().await {
         if e.code() == 1794 {
@@ -327,7 +225,7 @@ fn main() -> anyhow::Result<()> {
         .build()
         .unwrap()
         .block_on(staff(
-            matches.value_of("CONFIGURE").unwrap(),
+            matches.get_one("CONFIGURE").unwrap(),
             "localhost",
             25639,
         ))?;

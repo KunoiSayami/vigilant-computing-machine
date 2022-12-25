@@ -362,8 +362,8 @@ pub mod config {
     }
 
     impl Config {
-        pub fn api_key(&self) -> &str {
-            &self.api_key
+        pub fn identity(&self) -> &str {
+            &self.identity
         }
         pub fn need_disconnect(&self) -> bool {
             self.need_disconnect.unwrap_or_default()
