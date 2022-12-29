@@ -241,160 +241,6 @@ pub mod connect_info {
     impl FromQueryString for ConnectInfo {}
 }
 
-pub mod config {
-    use anyhow::anyhow;
-    use serde_derive::Deserialize;
-    use std::fs::read_to_string;
-    use std::path::Path;
-    /*use toml::value::Time;
-
-        #[derive(Clone, Debug, Deserialize)]
-        pub struct TimeOption {
-            enabled: bool,
-            start: Option<Time>,
-            end: Option<Time>,
-        }
-
-        impl TimeOption {
-            pub fn enabled(&self) -> bool {
-                self.enabled
-            }
-            pub fn start(&self) -> &Option<Time> {
-                &self.start
-            }
-            pub fn end(&self) -> &Option<Time> {
-                &self.end
-            }
-        }
-    */
-    #[derive(Clone, Debug, Deserialize)]
-    #[serde(untagged)]
-    pub enum Integer {
-        Single(i64),
-        Multiple(Vec<i64>),
-    }
-
-    impl Integer {
-        fn to_vec(&self) -> Vec<i64> {
-            match self {
-                Integer::Single(id) => {
-                    vec![*id]
-                }
-                Integer::Multiple(ids) => ids.clone(),
-            }
-        }
-    }
-
-    #[derive(Clone, Debug, Deserialize)]
-    pub struct Server {
-        address: String,
-        //port: u16,
-        channel: String,
-        timeout: Option<u64>,
-        password: Option<String>,
-        switch_wait: Option<u64>,
-        username: Option<String>,
-        //time: Option<TimeOption>,
-    }
-
-    impl Server {
-        pub fn address(&self) -> &str {
-            &self.address
-        }
-        /*pub fn port(&self) -> u16 {
-            self.port
-        }*/
-        pub fn channel(&self) -> &str {
-            &self.channel
-        }
-
-        pub fn timeout(&self) -> u64 {
-            self.timeout.map(|x| if x < 3 { 3 } else { x }).unwrap_or(3)
-        }
-        pub fn password(&self) -> &Option<String> {
-            &self.password
-        }
-        pub fn switch_wait(&self) -> u64 {
-            self.switch_wait
-                .map(|x| if x <= 500 { 500 } else { x })
-                .unwrap_or(500)
-        }
-
-        pub fn username(&self) -> &Option<String> {
-            &self.username
-        }
-    }
-
-    #[derive(Clone, Debug, Deserialize)]
-    pub struct Monitor {
-        #[serde(rename = "web")]
-        web_enabled: bool,
-        username: String,
-        backend: String,
-        interval: Option<u64>,
-    }
-
-    impl Monitor {
-        pub fn web_enabled(&self) -> bool {
-            self.web_enabled
-        }
-        pub fn username(&self) -> &str {
-            &self.username
-        }
-        pub fn backend(&self) -> &str {
-            &self.backend
-        }
-        pub fn interval(&self) -> u64 {
-            self.interval
-                .map(|x| if x == 0 { 1 } else { x })
-                .unwrap_or(1)
-        }
-    }
-
-    #[derive(Clone, Debug, Deserialize)]
-    pub struct Config {
-        api_key: String,
-        monitor_id: Integer,
-        need_disconnect: Option<bool>,
-        show_bot_tag: Option<bool>,
-        monitor: Monitor,
-        server: Server,
-    }
-
-    impl Config {
-        pub fn api_key(&self) -> &str {
-            &self.api_key
-        }
-        pub fn need_disconnect(&self) -> bool {
-            self.need_disconnect.unwrap_or_default()
-        }
-        pub fn monitor_id(&self) -> Vec<i64> {
-            self.monitor_id.to_vec()
-        }
-        pub fn monitor(&self) -> &Monitor {
-            &self.monitor
-        }
-        pub fn server(&self) -> &Server {
-            &self.server
-        }
-        pub fn show_bot_tag(&self) -> bool {
-            self.show_bot_tag.unwrap_or(false)
-        }
-    }
-
-    impl TryFrom<&Path> for Config {
-        type Error = anyhow::Error;
-
-        fn try_from(path: &Path) -> Result<Self, Self::Error> {
-            let content = read_to_string(path).map_err(|e| anyhow!("Read error: {:?}", e))?;
-
-            let result: Self =
-                toml::from_str(&content).map_err(|e| anyhow!("Deserialize toml error: {:?}", e))?;
-            Ok(result)
-        }
-    }
-}
-
 mod status_result {
     use crate::datastructures::QueryStatus;
     use anyhow::Error;
@@ -413,12 +259,6 @@ mod status_result {
             Self {
                 code: -1,
                 message: "Expect result but none found.".to_string(),
-            }
-        }
-        pub fn channel_not_found() -> Self {
-            Self {
-                code: -2,
-                message: "Channel not found".to_string(),
             }
         }
         pub fn database_id_error() -> Self {
@@ -446,6 +286,12 @@ mod status_result {
             Self {
                 code: -7,
                 message: format!("Result not found: {:?}", payload),
+            }
+        }
+        pub fn query_error(payload: &str) -> Self {
+            Self {
+                code: -8,
+                message: format!("Query client error: {:?}", payload),
             }
         }
         pub fn code(&self) -> i32 {
@@ -480,9 +326,68 @@ mod status_result {
     }
 }
 
+mod client_variable {
+
+    use super::{from_str, FromQueryString};
+    use crate::datastructures::ClientEdit;
+    use serde_derive::Deserialize;
+
+    #[derive(Clone, Debug, Default, Deserialize)]
+    pub struct ClientVariable {
+        #[serde(deserialize_with = "from_str", rename = "clid")]
+        client_id: i64,
+        #[serde(rename = "client_description")]
+        description: String,
+    }
+
+    impl ClientVariable {
+        pub fn client_id(&self) -> i64 {
+            self.client_id
+        }
+        pub fn description(&self) -> &str {
+            &self.description
+        }
+
+        pub fn into_edit(self, client_database_id: i64) -> ClientEdit {
+            ClientEdit::new(client_database_id, self.description)
+        }
+    }
+
+    impl FromQueryString for ClientVariable {}
+}
+
+mod client_edit {
+    use serde_derive::Serialize;
+
+    #[derive(Clone, Debug, Default, Serialize)]
+    pub struct ClientEdit {
+        #[serde(rename = "cldbid")]
+        client_database_id: i64,
+        #[serde(rename = "client_description")]
+        description: String,
+    }
+
+    impl ClientEdit {
+        pub fn new(client_database_id: i64, description: String) -> Self {
+            Self {
+                client_database_id,
+                description,
+                ..Default::default()
+            }
+        }
+        pub fn client_database_id(&self) -> i64 {
+            self.client_database_id
+        }
+        pub fn description(&self) -> &str {
+            &self.description
+        }
+    }
+}
+
 pub use channel::Channel;
 pub use client::Client;
-pub use config::Config;
+pub use client_edit::ClientEdit;
+pub use client_variable::ClientVariable;
 pub use connect_info::ConnectInfo;
 pub use create_channel::CreateChannel;
 pub use query_status::QueryStatus;

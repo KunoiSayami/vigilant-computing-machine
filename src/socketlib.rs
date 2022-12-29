@@ -1,11 +1,12 @@
-use crate::datastructures::{Channel, Client, ConnectInfo, QueryError, QueryResult, WhoAmI};
+use crate::datastructures::{
+    Client, ClientEdit, ClientVariable, ConnectInfo, QueryError, QueryResult, WhoAmI,
+};
 use crate::datastructures::{FromQueryString, QueryStatus};
 use anyhow::anyhow;
-use log::{error, info, warn};
+use log::{error, warn};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::time::error::Elapsed;
 const BUFFER_SIZE: usize = 512;
 
 pub struct SocketConn {
@@ -191,61 +192,15 @@ impl SocketConn {
         self.query_operation_non_error("clientlist\n\r").await
     }
 
-    pub async fn query_channels(&mut self) -> QueryResult<Vec<Channel>> {
-        self.query_operation_non_error("channellist\n\r").await
-    }
-
     #[allow(dead_code)]
     pub async fn logout(&mut self) -> QueryResult<()> {
         self.basic_operation("quit\n\r").await
-    }
-
-    pub async fn disconnect(&mut self) -> QueryResult<()> {
-        self.basic_operation("disconnect\n\r").await
-    }
-
-    pub async fn connect_server(
-        &mut self,
-        address: &str,
-        //connect_to: &str,
-        nick_name: &str,
-    ) -> QueryResult<()> {
-        self.basic_operation(&format!(
-            "connect address={} nickname={}\n\r",
-            address,
-            Self::escape(nick_name),
-        ))
-        .await
     }
 
     #[allow(dead_code)]
     pub async fn set_current_channel_password(&mut self, password: &str) -> QueryResult<()> {
         let me = self.who_am_i().await?;
         self.set_channel_password(me.channel_id(), password).await
-    }
-
-    pub async fn set_channel_password_if_switched(
-        &mut self,
-        password: &str,
-        current_channel_id: i64,
-        timeout: u64,
-    ) -> QueryResult<bool> {
-        if tokio::time::timeout(Duration::from_micros(timeout), async {
-            while let Ok(me) = self.who_am_i().await {
-                if me.channel_id() != current_channel_id {
-                    break;
-                }
-            }
-        })
-        .await
-        .is_ok()
-        {
-            let me = self.who_am_i().await?;
-            self.set_channel_password(me.channel_id(), password).await?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
     }
 
     pub async fn set_channel_password(&mut self, cid: i64, password: &str) -> QueryResult<()> {
@@ -275,73 +230,6 @@ impl SocketConn {
         .await
     }
 
-    pub async fn wait_until_connect(&mut self) -> QueryResult<()> {
-        while let Err(e) = self.who_am_i().await {
-            if e.code() == 1794 {
-                tokio::time::sleep(Duration::from_secs(1)).await;
-                continue;
-            } else {
-                return Err(e);
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn wait_timeout(&mut self, duration: Duration) -> Result<QueryResult<()>, Elapsed> {
-        tokio::time::timeout(duration, self.wait_until_connect()).await
-    }
-
-    pub async fn switch_channel_by_name(&mut self, channel_name: &str) -> QueryResult<i64> {
-        let me = self.who_am_i().await?;
-        for channel in self
-            .query_channels()
-            .await
-            .map_err(|e| anyhow!("Can't fetch channels: {:?}", e))?
-        {
-            if channel.channel_name().eq(channel_name) {
-                self.basic_operation(&format!(
-                    "clientmove cid={} clid={}\n\r",
-                    channel.cid(),
-                    me.client_id(),
-                ))
-                .await?;
-                return Ok(channel.cid());
-            }
-        }
-        Err(QueryError::channel_not_found())
-    }
-
-    pub async fn check_self_duplicate(&mut self) -> QueryResult<bool> {
-        let me = self.who_am_i().await?;
-        let clients = self.query_clients().await?;
-        let mut database_id = 0;
-        for client in &clients {
-            if client.client_id() == me.client_id() {
-                database_id = client.client_database_id();
-            }
-        }
-        if database_id == 0 {
-            return Err(QueryError::database_id_error());
-        }
-
-        Ok(clients
-            .iter()
-            .filter(|&n| n.client_database_id() == database_id)
-            .count()
-            > 1)
-    }
-
-    #[allow(dead_code)]
-    pub async fn check_self_duplicate_with_id(&mut self, database_id: i64) -> QueryResult<bool> {
-        Ok(self
-            .query_clients()
-            .await?
-            .iter()
-            .filter(|&n| n.client_database_id() == database_id)
-            .count()
-            > 1)
-    }
-
     pub async fn query_database_id(&mut self) -> QueryResult<i64> {
         let my = self.who_am_i().await?;
         let mut database_id = 0;
@@ -359,118 +247,28 @@ impl SocketConn {
         }
         Ok(database_id)
     }
-}
 
-pub struct VLCConn {
-    conn: TcpStream,
-}
-
-impl VLCConn {
-    async fn read_data(&mut self) -> anyhow::Result<Option<String>> {
-        let mut buffer = [0u8; BUFFER_SIZE];
-        let mut ret = String::new();
-        loop {
-            let size = if let Ok(data) =
-                tokio::time::timeout(Duration::from_secs(2), self.conn.read(&mut buffer)).await
-            {
-                match data {
-                    Ok(size) => size,
-                    Err(e) => return Err(anyhow!("Got error while read data: {:?}", e)),
-                }
-            } else {
-                return Ok(None);
-            };
-
-            ret.push_str(&String::from_utf8_lossy(&buffer[..size]));
-            if size < BUFFER_SIZE || (ret.contains("error id=") && ret.ends_with("\n\r")) {
-                break;
-            }
-        }
-        Ok(Some(ret))
+    pub async fn update_client_description(&mut self, edit_var: ClientEdit) -> QueryResult<()> {
+        self.basic_operation(&format!(
+            "clientdbedit cldbid={} client_description={}\n\r",
+            edit_var.client_database_id(),
+            Self::escape(edit_var.description())
+        ))
+        .await
     }
 
-    async fn write_data(&mut self, payload: &str) -> anyhow::Result<()> {
-        debug_assert!(payload.ends_with("\n\r"));
-        self.conn
-            .write(payload.as_bytes())
-            .await
-            .map(|size| {
-                if size != payload.as_bytes().len() {
-                    error!(
-                        "Error payload size mismatch! expect {} but {} found. payload: {:?}",
-                        payload.as_bytes().len(),
-                        size,
-                        payload
-                    )
-                }
-            })
-            .map_err(|e| anyhow!("Got error while send data: {:?}", e))?;
-        Ok(())
-    }
-    pub async fn connect(server: &str, port: u16, password: &str) -> anyhow::Result<Self> {
-        let conn = TcpStream::connect(format!("{}:{}", server, port))
-            .await
-            .map_err(|e| anyhow!("Got error while connect to {}:{} {:?}", server, port, e))?;
-
-        let mut self_ = Self { conn };
-
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        let content = self_
-            .read_data()
-            .await
-            .map_err(|e| anyhow!("Got error in connect while read content: {:?}", e))?
-            .unwrap();
-
-        if content.contains("Password") {
-            self_
-                .write_data(password)
-                .await
-                .map_err(|e| anyhow!("Got error while write password: {:?}", e))?;
-        }
-
-        let content = self_
-            .read_data()
-            .await
-            .map_err(|e| anyhow!("Got error in verify password: {:?}", e))?
-            .unwrap();
-
-        if content.contains("Welcome, Master") {
-            info!("Login successful");
-        } else {
-            return Err(anyhow!("Wrong password!"));
-        }
-
-        Ok(self_)
-    }
-
-    pub async fn get_status(&mut self) -> anyhow::Result<bool> {
-        self.write_data("status\n\r")
-            .await
-            .map_err(|e| anyhow!("Got error while write VLC status: {:?}", e))?;
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let content = self
-            .read_data()
-            .await
-            .map_err(|e| anyhow!("Got error while read VLC status: {:?}", e))?
-            .ok_or_else(|| anyhow!("VLC return data is None"))?;
-
-        if !content.contains("( state") {
-            return Err(anyhow!("Return value not include VLC status"));
-        }
-
-        for line in content.lines() {
-            if line.contains("( state") {
-                return Ok(line.contains("playing )"));
-            }
-        }
-        Ok(false)
-    }
-
-    pub async fn play(&mut self) -> anyhow::Result<()> {
-        self.write_data("play\n\r").await
-    }
-
-    pub async fn pause(&mut self) -> anyhow::Result<()> {
-        self.write_data("pause\n\r").await
+    pub async fn query_client_description(
+        &mut self,
+        client_id: i64,
+    ) -> QueryResult<ClientVariable> {
+        self.query_operation(&format!(
+            "clientvariable clid={} client_description\n\r",
+            client_id
+        ))
+        .await
+        .map(|x| {
+            x.map(|mut o| o.remove(0))
+                .ok_or_else(|| QueryError::query_error("str"))
+        })?
     }
 }
