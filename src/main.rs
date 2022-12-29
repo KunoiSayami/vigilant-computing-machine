@@ -3,6 +3,7 @@ use crate::socketlib::SocketConn;
 use anyhow::anyhow;
 use clap::{arg, Command};
 use log::info;
+use rand::distributions::{Distribution, Uniform};
 use std::time::Duration;
 use tokio::sync::oneshot::Receiver;
 
@@ -19,6 +20,9 @@ async fn real_staff(
         .query_database_id()
         .await
         .map_err(|e| anyhow!("Got query database id error: {:?}", e))?;
+
+    let mut rng = rand::thread_rng();
+    let die = Uniform::from(50..70);
     loop {
         if recv.try_recv().is_ok() {
             info!("Exit!");
@@ -28,7 +32,7 @@ async fn real_staff(
         conn.update_client_description(variable.clone().into_edit(database_id))
             .await?;
 
-        if tokio::time::timeout(Duration::from_secs(60), &mut recv)
+        if tokio::time::timeout(Duration::from_secs(die.sample(&mut rng)), &mut recv)
             .await
             .is_ok()
         {
