@@ -47,11 +47,42 @@ async fn staff(key: String, server: &str, port: u16) -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow!("Connect teamspeak console error: {:?}", e))?;
     conn.login(&key).await?;
+
+    let (sender, mut receiver) = tokio::sync::oneshot::channel();
+    tokio::select! {
+        _ = async move {
+            tokio::signal::ctrl_c().await.unwrap();
+            info!("Recv SIGINT signal, send exit signal");
+            sender.send(true).unwrap();
+            tokio::signal::ctrl_c().await.unwrap();
+            info!("Recv SIGINT again, force exit.");
+            std::process::exit(137);
+        } => {
+            return Ok(())
+        }
+
+        _ = async {
+            while let Err(e) = conn.who_am_i().await {
+                if e.code() == 1794 {
+                    if tokio::time::timeout(Duration::from_secs(1), &mut receiver)
+                        .await
+                        .is_ok()
+                    {
+                        return Err(e);
+                    }
+                } else {
+                    return Err(e);
+                }
+            }
+            Ok(())
+        } => {
+
+        }
+    }
     let who_am_i = conn.who_am_i().await?;
     //conn.register_events().await??;
 
     let variable = conn.query_client_description(who_am_i.client_id()).await?;
-
     let (sender, receiver) = tokio::sync::oneshot::channel();
     //let keepalive_signal = Arc::new(Mutex::new(false));
     tokio::select! {
@@ -81,17 +112,10 @@ async fn staff(key: String, server: &str, port: u16) -> anyhow::Result<()> {
 fn main() -> anyhow::Result<()> {
     let matches = Command::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
-        .args(&[
-            arg!([CONFIGURE] "Configure file"),
-            arg!(--server "Specify server"),
-            arg!(--port "Specify port"),
-        ])
+        .args(&[arg!(<API_KEY> "Api key of client query")])
         .get_matches();
 
-    env_logger::Builder::from_default_env()
-        .filter_module("html5ever", log::LevelFilter::Warn)
-        .filter_module("reqwest", log::LevelFilter::Warn)
-        .init();
+    env_logger::Builder::from_default_env().init();
 
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -99,7 +123,7 @@ fn main() -> anyhow::Result<()> {
         .unwrap()
         .block_on(staff(
             matches
-                .get_one("CONFIGURE")
+                .get_one("API_KEY")
                 .map(|s: &String| s.to_string())
                 .unwrap(),
             "localhost",
